@@ -8,10 +8,16 @@ from datetime import datetime
 import os
 
 # ─── 설정 ───────────────────────────────────────
-GENSPARK_API_KEY = os.environ.get("GENSPARK_API_KEY")
-GMAIL_ADDRESS    = os.environ.get("GMAIL_ADDRESS")
-GMAIL_APP_PW     = os.environ.get("GMAIL_APP_PW")
-TO_EMAIL         = os.environ.get("TO_EMAIL")
+GENSPARK_API_KEY = os.environ.get("GENSPARK_API_KEY", "")
+GMAIL_ADDRESS    = os.environ.get("GMAIL_ADDRESS", "")
+GMAIL_APP_PW     = os.environ.get("GMAIL_APP_PW", "")
+TO_EMAIL         = os.environ.get("TO_EMAIL", "")
+
+print(f"✅ 환경변수 확인:")
+print(f"   GMAIL_ADDRESS: {GMAIL_ADDRESS}")
+print(f"   TO_EMAIL: {TO_EMAIL}")
+print(f"   GENSPARK_API_KEY: {'설정됨' if GENSPARK_API_KEY else '없음'}")
+print(f"   GMAIL_APP_PW: {'설정됨' if GMAIL_APP_PW else '없음'}")
 
 # ─── 뉴스레터 초안 생성 ──────────────────────────
 def generate_newsletter():
@@ -32,6 +38,7 @@ def generate_newsletter():
 뉴스 3개 작성 후 마지막에
 ✍️ 에디터 한마디 (3줄 이내): 도 추가해줘."""
 
+    print("📡 Genspark API 호출 중...")
     response = requests.post(
         "https://api.genspark.ai/v1/chat/completions",
         headers={
@@ -42,9 +49,11 @@ def generate_newsletter():
             "model": "genspark-reasoning-search",
             "messages": [{"role": "user", "content": prompt}],
             "stream": False
-        }
+        },
+        timeout=60
     )
 
+    print(f"📡 Genspark 응답 코드: {response.status_code}")
     data = response.json()
     return data["choices"][0]["message"]["content"]
 
@@ -58,42 +67,31 @@ def send_email(content):
     msg["From"]    = GMAIL_ADDRESS
     msg["To"]      = TO_EMAIL
 
-    # 텍스트 버전
     text_body = f"""BX브리프 주간 초안입니다.
-아래 내용을 검토 후 Stibee에 붙여넣어 발송해주세요.
+검토 후 Stibee에 붙여넣어 발송해주세요.
 
 {'='*50}
-
 {content}
-
 {'='*50}
 
-※ 이 메일은 Railway에서 매주 월요일 오전 7시에 자동 발송됩니다.
+이 메일은 Railway에서 매주 월요일 오전 7시에 자동 발송됩니다.
 """
 
-    # HTML 버전
     html_content = content.replace('\n', '<br>')
     html_body = f"""
 <html>
-<body style="font-family: 'Noto Serif KR', Georgia, serif; max-width: 680px; margin: 0 auto; padding: 40px 20px; background: #f5f0e8; color: #0d0d0d;">
-
+<body style="font-family: Georgia, serif; max-width: 680px; margin: 0 auto; padding: 40px 20px; background: #f5f0e8; color: #0d0d0d;">
   <div style="border-bottom: 3px solid #0d0d0d; padding-bottom: 20px; margin-bottom: 30px;">
-    <h1 style="font-size: 2rem; letter-spacing: 0.03em; margin: 0;">BX브리프</h1>
+    <h1 style="font-size: 2rem; margin: 0;">BX브리프</h1>
     <p style="color: #7a7265; font-size: 0.8rem; margin: 5px 0 0;">브랜드 경험 설계 뉴스레터 · {today} 초안</p>
   </div>
-
   <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 15px 20px; border-radius: 4px; margin-bottom: 30px;">
-    <strong>✏️ 검토 필요</strong> — 아래 내용을 확인 후 Stibee에 붙여넣어 발송해주세요.
+    <strong>✏️ 검토 필요</strong> — 아래 내용 확인 후 Stibee에 붙여넣어 발송해주세요.
   </div>
-
-  <div style="line-height: 1.9; font-size: 0.95rem;">
-    {html_content}
-  </div>
-
+  <div style="line-height: 1.9; font-size: 0.95rem;">{html_content}</div>
   <div style="border-top: 1px solid #d4cfc4; margin-top: 40px; padding-top: 20px; color: #7a7265; font-size: 0.75rem;">
-    이 메일은 Railway에서 매주 월요일 오전 7시에 자동 발송됩니다.
+    Railway에서 매주 월요일 오전 7시 자동 발송
   </div>
-
 </body>
 </html>
 """
@@ -101,11 +99,11 @@ def send_email(content):
     msg.attach(MIMEText(text_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
+    print(f"📧 Gmail 발송 중... {GMAIL_ADDRESS} → {TO_EMAIL}")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PW)
         server.sendmail(GMAIL_ADDRESS, TO_EMAIL, msg.as_string())
-
-    print(f"✅ 발송 완료: {subject}")
+    print(f"✅ 발송 완료!")
 
 # ─── 메인 실행 ───────────────────────────────────
 def run_newsletter():
@@ -116,15 +114,19 @@ def run_newsletter():
         send_email(content)
     except Exception as e:
         print(f"❌ 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
 
 # 매주 월요일 오전 7시 실행
 schedule.every().monday.at("07:00").do(run_newsletter)
 
-print("⏰ 스케줄러 시작 — 매주 월요일 07:00 자동 실행")
+# RUN_NOW=true 이면 즉시 실행
+run_now = os.environ.get("RUN_NOW", "").strip().lower()
+print(f"⏰ 스케줄러 시작 — 매주 월요일 07:00 자동 실행")
+print(f"🔍 RUN_NOW 값: '{run_now}'")
 
-# 처음 실행 시 테스트용으로 즉시 1회 실행
-if os.environ.get("RUN_NOW") == "true":
-    print("🧪 테스트 실행 중...")
+if run_now == "true":
+    print("🧪 즉시 테스트 실행!")
     run_newsletter()
 
 while True:
